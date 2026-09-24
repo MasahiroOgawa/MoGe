@@ -43,6 +43,12 @@ def main() -> int:
     ap.add_argument("--model", default="Ruicheng/moge-3-vitl",
                     help="HF id, e.g. Ruicheng/moge-3-vitl or Ruicheng/moge-3-vitg")
     ap.add_argument("--refine-steps", type=int, default=3)
+    ap.add_argument("--num-tokens", type=int, default=None,
+                    help="base ViT token count. Default (None) uses resolution_level=9, "
+                         "i.e. 3600 tokens -- so on a 640x192 clip MoGe builds a 33x110 "
+                         "grid and decodes at 528x1760 before downsampling to the output. "
+                         "Set this to match another method's token budget when the "
+                         "comparison is meant to isolate METHOD from RESOLUTION.")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
 
@@ -56,7 +62,8 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     clips = sorted((inp / "clips").iterdir())
     (out / "model_info.json").write_text(json.dumps(
-        {"model": args.model, "params": n_par, "refine_steps": args.refine_steps}, indent=1))
+        {"model": args.model, "params": n_par, "refine_steps": args.refine_steps,
+         "num_tokens": args.num_tokens}, indent=1))
 
     t0, n_frames = time.time(), 0
     for ci, cdir in enumerate(clips):
@@ -69,7 +76,9 @@ def main() -> int:
             arr = np.asarray(Image.open(png).convert("RGB"), dtype=np.float32) / 255.0
             img = torch.from_numpy(arr).permute(2, 0, 1).to(args.device)
             with torch.no_grad():
-                pred = model.infer(img, refine_steps=args.refine_steps)
+                pred = model.infer(img, refine_steps=args.refine_steps,
+                                   **({} if args.num_tokens is None
+                                      else {"num_tokens": args.num_tokens}))
             depth = pred["depth"].float()
             # `mask` marks where the geometry is defined; zero elsewhere so a consumer's
             # "valid = depth > 0" convention holds without it needing MoGe's mask too.
